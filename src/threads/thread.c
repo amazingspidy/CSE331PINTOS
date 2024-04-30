@@ -93,6 +93,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&sleep_list);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -314,6 +315,47 @@ thread_yield (void)
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
+}
+
+void
+thread_sleep(int64_t ticks) 
+{
+  struct thread *cur;
+  enum intr_level old_level;
+
+  ASSERT (!intr_context ());
+
+  old_level = intr_disable ();
+  // intr 끄고 cur을 가져오는게 더 정확. 그전에 스위칭될수있다.
+  cur = thread_current ();
+  if (cur != idle_thread) {
+    list_push_back (&sleep_list, &cur->elem);
+    cur->status = THREAD_BLOCKED;
+    cur->wakeup_tick = ticks;
+  }
+
+  schedule ();
+  intr_set_level (old_level);
+}
+
+void
+thread_wakeup(int64_t ticks)
+{
+  int64_t now_ticks = timer_ticks ();
+
+  struct list_elem *sleep_iter = list_begin(&sleep_list);
+  
+  for (sleep_iter; sleep_iter != list_end(&sleep_list);) {
+    struct thread *sleeping_thread = list_entry(sleep_iter, struct thread, elem);
+    if (sleeping_thread -> wakeup_tick <= ticks) {
+      sleep_iter = list_remove(sleep_iter); //여기서 remove시, 알아서 다음 요소를 준다. next 사용 안해도됨.
+      thread_unblock(sleeping_thread);
+    }
+    else {
+      sleep_iter = list_next(sleep_iter);
+    }
+    
+  }
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
