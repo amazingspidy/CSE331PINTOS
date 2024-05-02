@@ -237,6 +237,19 @@ bool compare_by_priority(const struct list_elem *a, const struct list_elem *b, v
   return thread_a->priority > thread_b->priority;
 }
 
+bool compare_by_priority_donator(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+  if (a == NULL) {
+    return true;
+  }
+  if (b == NULL) {
+    return false;
+  }
+
+  struct thread *thread_a = list_entry(a, struct thread, donation_elem);
+  struct thread *thread_b = list_entry(b, struct thread, donation_elem);
+  return thread_a->priority > thread_b->priority;
+}
+
 void
 thread_block (void) 
 {
@@ -541,6 +554,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->original_priority = priority;
+  list_init(&t->donator_list);
+  t->lock_waiting_for = NULL;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
