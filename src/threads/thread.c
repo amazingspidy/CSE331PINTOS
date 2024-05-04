@@ -185,7 +185,6 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -204,14 +203,7 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   /* go to ready list*/
   thread_unblock (t);
-
-  if (!list_empty(&ready_list)) {
-    struct thread *cur = thread_current();
-    struct thread *high_priority_thread = list_entry(list_front(&ready_list), struct thread, elem);
-    if (high_priority_thread->priority > cur->priority) {
-      thread_yield();
-    }
-  }
+  thread_try_preemption();
   
 
   return tid;
@@ -381,11 +373,10 @@ thread_sleep(int64_t ticks)
 void
 thread_wakeup(int64_t ticks)
 {
-  int64_t now_ticks = timer_ticks ();
-
-  struct list_elem *sleep_iter = list_begin(&sleep_list);
+  //int64_t now_ticks = timer_ticks ();
+  struct list_elem *sleep_iter;
   
-  for (sleep_iter; sleep_iter != list_end(&sleep_list);) {
+  for (sleep_iter=list_begin(&sleep_list); sleep_iter != list_end(&sleep_list);) {
     struct thread *sleeping_thread = list_entry(sleep_iter, struct thread, elem);
     if (sleeping_thread -> wakeup_tick <= ticks) {
       sleep_iter = list_remove(sleep_iter); //여기서 remove시, 알아서 다음 요소를 준다. next 사용 안해도됨.
@@ -419,15 +410,12 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-  list_sort(&ready_list, compare_by_priority, NULL);
-  if (!list_empty(&ready_list)) {
-    struct thread *cur = thread_current();
-    struct thread *high_priority_thread = list_entry(list_front(&ready_list), struct thread, elem);
-    if (high_priority_thread->priority > cur->priority) {
-      thread_yield();
-    }
-  }
+  //If not turn off interrupts here, the changing in priority will not be immediate and may cause scheduling problems.
+  enum intr_level old_level = intr_disable ();
+  thread_current ()->original_priority = new_priority;
+  thread_rollback_priority();
+  thread_try_preemption ();
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -436,6 +424,84 @@ thread_get_priority (void)
 {
   return thread_current ()->priority;
 }
+
+void 
+thread_set_lock_waiting_for(struct lock *lock) {
+  thread_current ()->lock_waiting_for = lock;
+}
+
+void 
+thread_try_preemption(void){
+  enum intr_level old_level = intr_disable ();
+
+  if (!list_empty(&ready_list)) {
+    //After checking the above if statement, turn off interrupt.  
+    //Because when it switches,there may be nothing in the ready_list when it goes down.
+    if (thread_current()->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority) {
+      thread_yield();
+    }
+  }
+  intr_set_level (old_level);
+}
+
+
+void
+thread_add_donator_by_priority(struct thread *pred, struct thread *cur) {
+  list_insert_ordered(&pred->donator_list, &cur->donation_elem, compare_by_priority_donator, NULL);
+}
+
+void
+thread_priority_donation(void) {
+  struct thread *cur = thread_current();
+  
+  for (int i = 0; i < 8; i++) { //fully nested max depth = 8
+    if (cur->lock_waiting_for) {
+      struct thread *cur_lock_predecessor = cur->lock_waiting_for->holder;
+      cur_lock_predecessor->priority = cur->priority;
+      cur = cur_lock_predecessor;
+    }
+    else {
+      break;
+    }
+  }
+}
+
+void
+thread_delete_some_donator(struct lock *lock) {
+  struct thread *lock_holder = thread_current();
+  struct list_elem *iter;
+  
+  for (iter = list_begin(&lock_holder->donator_list); iter != list_end(&lock_holder->donator_list);) {
+    struct thread *donator_thread = list_entry(iter, struct thread, donation_elem);
+    if (donator_thread->lock_waiting_for == lock) {
+      iter = list_remove(&donator_thread->donation_elem);
+    }
+    else {
+      iter = list_next(iter);
+    }
+  }
+  
+}
+
+
+void
+thread_rollback_priority(void) {
+  struct thread *cur = thread_current();
+  cur->priority = cur->original_priority;
+
+  if (list_empty(&cur->donator_list)) {
+    return;
+  }
+
+  list_sort(&cur->donator_list, compare_by_priority_donator, NULL);
+  struct list_elem *front = list_front(&cur->donator_list);
+  struct thread *thread_high_priority = list_entry(front, struct thread, donation_elem);
+  if (cur->priority < thread_high_priority->priority) {
+    cur->priority = thread_high_priority->priority;
+  }
+  return;
+}
+
 
 /* Sets the current thread's nice value to NICE. */
 void
