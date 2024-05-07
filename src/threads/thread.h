@@ -23,7 +23,9 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
-
+#define NICE_MIN -20
+#define NICE_DEFAULT 0
+#define NICE_MAX 20
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -88,16 +90,20 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int original_priority;
-    int64_t wakeup_tick;                /* wakeup_tick for sleeping threads*/
     struct list_elem allelem;           /* List element for all threads list. */
     
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    int64_t wakeup_tick;                /* wakeup_tick for sleeping threads*/  
+
+    int original_priority;
     struct list_elem donation_elem;
     struct list donator_list;
     struct lock *lock_waiting_for;
+
+    int nice;
+    int recent_cpu;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -141,14 +147,27 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_try_preemption(void);
 void thread_set_lock_waiting_for(struct lock *);
 void thread_add_donator_by_priority(struct thread *pred, struct thread *cur);
 void thread_priority_donation(void);
 void thread_delete_some_donator(struct lock *lock);
 void thread_rollback_priority(void);
+void calculate_mlfq_priority(struct thread*);
+void calculate_mlfq_load_avg(void);
+void calculate_mlfq_recent_cpu(struct thread *);
+void increase_mlfq_recent_cpu(void);
+void recompute_mlfq_priority(void);
+void update_mlfq_recent_cpu(void);
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-void thread_try_preemption(void);
+
+void mlfqs_increment_recent_cpu (void);
+void mlfqs_recalculate_priority (void);
+void mlfqs_recalculate_recent_cpu (void);
+void mlfqs_calculate_load_avg (void);
+void mlfqs_calculate_priority (struct thread *t);
+void mlfqs_calculate_recent_cpu (struct thread *t);
 #endif /* threads/thread.h */

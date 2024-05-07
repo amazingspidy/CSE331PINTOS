@@ -202,15 +202,18 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   struct thread *cur = thread_current();
-  if (lock->holder) { //when lock owner exists.
-    thread_set_lock_waiting_for(lock);
-    thread_add_donator_by_priority(lock->holder, cur);
+  if (!thread_mlfqs && lock->holder) { //when lock owner exists.
+    //thread_set_lock_waiting_for(lock);
+    cur->lock_waiting_for = lock;
+    //thread_add_donator_by_priority(lock->holder, cur);
+    list_insert_ordered(&lock->holder->donator_list, &cur->donation_elem, compare_by_priority_donator, NULL);
     //donation part. 
     thread_priority_donation();
   }
+
   sema_down (&lock->semaphore); //go to wait
   cur->lock_waiting_for = NULL; //wake up moment
-  lock->holder = cur;
+  lock->holder = thread_current();
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -243,9 +246,11 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-  
-  thread_delete_some_donator(lock);
-  thread_rollback_priority();
+
+  if (!thread_mlfqs){
+    thread_delete_some_donator(lock);
+    thread_rollback_priority();
+  }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
