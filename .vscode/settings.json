@@ -1,6 +1,9 @@
 {
     "files.associations": {
         "__threading_support": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "complex": "c",
+        "thread.h": "c",
+        "syscall.h": "c"
     }
 }

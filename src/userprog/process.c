@@ -29,15 +29,19 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
-  tid_t tid;
+  char *save_ptr;
 
+  //char *args;
+  tid_t tid;
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-
+  
+  strtok_r(file_name, " ", &save_ptr);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
@@ -45,12 +49,53 @@ process_execute (const char *file_name)
   return tid;
 }
 
+void
+argument_stack (char **arg_list, int cnt, void **esp) { 
+  uint32_t *arg_address_list[cnt];
+  for (int i = cnt - 1; i >= 0; i--) {
+    for (int j = strlen(arg_list[i]); j >= 0; j--) {
+      *esp = *esp - 1;
+      **(char **)esp = arg_list[i][j];
+    }
+    arg_address_list[i] = (uint32_t *)*esp;
+  }
+
+  // 4byte align
+  while((uint32_t)*esp % 4 != 0) {
+    *esp = *esp - 1;
+    **(uint8_t **)esp = 0;
+  }
+
+  *esp = *esp - 4;
+  **(uint32_t **)esp = 0;
+
+  for (int i = cnt - 1; i >= 0; i--) {
+    *esp = *esp - 4;
+    **(uint32_t **)esp = (uint32_t)arg_address_list[i];
+  }
+
+  //argv
+  *esp = *esp - 4;
+  **(uint32_t **)esp = (*esp + 4);
+  
+  //argc
+  *esp = *esp - 4;
+  *((int*) *esp) = cnt;
+
+  *esp = *esp - 4;
+  **(uint32_t **)esp = 0;
+}
+
+
 /* A thread function that loads a user process and starts it
    running. */
 static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
+  // char *safe_name = (char *)palloc_get_page(PAL_ZERO);
+  // strlcpy(safe_name, (char *)file_name_, strlen(file_name_) + 1);
+
   struct intr_frame if_;
   bool success;
 
@@ -59,12 +104,25 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  char *arg_list[100];
+  int cnt = 0;
+  char *arg;
+  char *rest_arg;
+
+  arg = strtok_r(file_name, " ", &rest_arg);
+  success = load (file_name, &if_.eip, &if_.esp);
+  
+  for (arg; arg != NULL; arg = strtok_r(NULL, " ", &rest_arg)) {
+    arg_list[cnt++] = arg;
+  }
+  arg_list[cnt] = NULL;
+  
+
+  if (!success) {
+    palloc_free_page (file_name);
     thread_exit ();
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -72,6 +130,10 @@ start_process (void *file_name_)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
+  argument_stack(arg_list, cnt, &if_.esp);
+  //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+
+  palloc_free_page (file_name);
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
@@ -87,7 +149,11 @@ start_process (void *file_name_)
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
-{
+{ 
+  int i;
+  for (i = 0; i < 100000000; i++) {
+
+  }
   return -1;
 }
 

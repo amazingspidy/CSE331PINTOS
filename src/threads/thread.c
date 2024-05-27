@@ -448,9 +448,9 @@ thread_set_lock_waiting_for(struct lock *lock) {
 
 void 
 thread_try_preemption(void){
-  enum intr_level old_level = intr_disable ();
+  //enum intr_level old_level = intr_disable ();
 
-  if (!list_empty(&ready_list)) {
+  if (!list_empty(&ready_list) && !intr_context()) {
     //Before checking the above if statement, turn off interrupt.  
     //Because when it switches,there may be nothing in the ready_list when it goes down.
     struct thread *ready_high_thread = list_entry(list_front(&ready_list), struct thread, elem);
@@ -458,8 +458,9 @@ thread_try_preemption(void){
       thread_yield();
     }
   }
-  intr_set_level (old_level);
+  //intr_set_level (old_level);
 }
+
 
 
 void
