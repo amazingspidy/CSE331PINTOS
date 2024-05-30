@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -29,9 +30,7 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
-  char *save_ptr;
-
-  //char *args;
+  char *rest_ptr;
   tid_t tid;
   
   /* Make a copy of FILE_NAME.
@@ -41,12 +40,21 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
   
-  strtok_r(file_name, " ", &save_ptr);
+  strtok_r(file_name, " ", &rest_ptr);
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
+  sema_down(&thread_current()->sema_for_load);
+  if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
-  return tid;
+    return tid;
+  }
+  struct thread* child = search_child_by_pid(tid);
+  if (child && child->load_success) {
+    return tid;
+  }
+  //그외 모두
+  return TID_ERROR;
 }
 
 void
@@ -92,9 +100,8 @@ argument_stack (char **arg_list, int cnt, void **esp) {
 static void
 start_process (void *file_name_)
 {
-  char *file_name = file_name_;
-  // char *safe_name = (char *)palloc_get_page(PAL_ZERO);
-  // strlcpy(safe_name, (char *)file_name_, strlen(file_name_) + 1);
+  char *file_name = (char *)palloc_get_page(PAL_ZERO);
+  strlcpy(file_name, (char *)file_name_, strlen(file_name_) + 1);
 
   struct intr_frame if_;
   bool success;
@@ -117,20 +124,30 @@ start_process (void *file_name_)
     arg_list[cnt++] = arg;
   }
   arg_list[cnt] = NULL;
-  
 
-  if (!success) {
+  if (success) {// success load. 
+    thread_current()->load_success = true;
+    argument_stack(arg_list, cnt, &if_.esp);  
+    sema_up(&thread_current()->parent->sema_for_load);
+  }
+  
+  else {
+    thread_current()->parent->load_success = false;
     palloc_free_page (file_name);
+    sema_up(&thread_current()->parent->sema_for_load);
     thread_exit ();
   }
 
+  
+  
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
-  argument_stack(arg_list, cnt, &if_.esp);
+  
+  
   //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
 
   palloc_free_page (file_name);
@@ -147,14 +164,49 @@ start_process (void *file_name_)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
+struct thread*
+search_child_by_pid(pid_t pid) {
+  struct thread *now = thread_current();
+  struct list_elem *iter;
+  struct thread *child;
+
+  if (list_empty(&now->child_list)) {
+    return NULL;
+  }
+
+  for (iter = list_begin(&now->child_list); iter != list_end(&now->child_list); iter = list_next(iter)) {
+    child = list_entry(iter, struct thread, child_elem);
+    if (pid == child->tid && child->load_success) {
+      return child;
+    }
+  }
+  return NULL;
+}
+  
 int
 process_wait (tid_t child_tid UNUSED) 
 { 
-  int i;
-  for (i = 0; i < 100000000; i++) {
-
+  // for (int i= 0; i < 100000000; i++) {
+  // }
+  // return -1;
+  if (child_tid == -1) {
+    return -1;
   }
-  return -1;
+
+  struct thread *child = search_child_by_pid(child_tid);
+  int exit_status;
+  if (child == NULL) {
+    return -1;
+  }
+  if (child->exit_status !=0) { //사전종료된경우
+    return child->exit_status;
+  }
+  // parent wait child to exit
+  sema_down(&child->sema_for_wait);
+  exit_status = child->exit_status;
+  list_remove(&child->child_elem);
+  sema_up(&child->sema_for_exit);
+  return exit_status;
 }
 
 /* Free the current process's resources. */
@@ -180,6 +232,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  cur->exit_success = true;
+  sema_up(&cur->sema_for_wait);
+  sema_down(&cur->sema_for_exit);
 }
 
 /* Sets up the CPU for running user code in the current

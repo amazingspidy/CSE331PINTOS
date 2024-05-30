@@ -4,8 +4,21 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "filesys/filesys.h"
+#include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 
 static void syscall_handler (struct intr_frame *);
+void address_safe_check(void* add);
+
+void
+address_safe_check(void* add) {
+  if (add == NULL) {
+    syscall_exit(-1);
+  }
+  if (!is_user_vaddr(add)) {
+    syscall_exit(-1);
+  }
+}
 
 void
 syscall_init (void) 
@@ -18,6 +31,7 @@ void syscall_halt(void) {
 }
 
 void syscall_exit(int status) {
+  thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
   thread_exit();
 }
@@ -60,18 +74,28 @@ syscall_write(int fd, const void *buffer, unsigned size) {
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
-{ uint32_t *esp = f->esp;
+{ void *esp = f->esp;
+  uint32_t syscall_num = *(uint32_t *)(esp);
+  uint32_t arg_0, arg_1, arg_2;
   
-  switch (*(uint32_t *)(f->esp)) {
+  switch (syscall_num) {
     case SYS_HALT:
       syscall_halt();
       break;
     case SYS_EXIT:
-      syscall_exit(*(esp + 1));
+      address_safe_check(esp + 4);
+      arg_0 = (*(uint32_t *)(esp + 4));
+      syscall_exit((int)arg_0);
       break;
     case SYS_EXEC:
+      address_safe_check(esp + 4);
+      arg_0 = (*(uint32_t *)(esp + 4));
+      f->eax = (uint32_t) syscall_exec((char *)arg_0);
       break;
     case SYS_WAIT:
+      address_safe_check(esp + 4);
+      arg_0 = (*(uint32_t *)(esp + 4));
+      f->eax = syscall_wait((pid_t)arg_0);
       break;
     case SYS_CREATE:
       break;
@@ -84,7 +108,13 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_READ:
       break;
     case SYS_WRITE:
-      f->eax = syscall_write (*(esp + 1), (void *) *(esp + 2), *(esp + 3));
+      address_safe_check(esp + 4);
+      address_safe_check(esp + 8);
+      address_safe_check(esp + 12);
+      arg_0 = (*(uint32_t *)(esp + 4));
+      arg_1 = (*(uint32_t *)(esp + 8));
+      arg_2 = (*(uint32_t *)(esp + 12));
+      f->eax = syscall_write ((int)arg_0, (void *)arg_1, (unsigned)arg_2);
       break;
     case SYS_SEEK:
       break;
@@ -93,7 +123,5 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CLOSE:
       break;
 
-  // printf ("system call!\n");
-  // thread_exit ();
   }
 }

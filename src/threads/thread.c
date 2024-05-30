@@ -105,6 +105,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  //initial_thread->parent = NULL;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -204,6 +205,11 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  /*for Hierarchy*/
+  
+  list_push_back(&thread_current()->child_list, &t->child_elem);
+  t->parent = thread_current();
+  
   /* Add to run queue. */
   /* go to ready list*/
   thread_unblock (t);
@@ -723,6 +729,15 @@ init_thread (struct thread *t, const char *name, int priority)
   t->recent_cpu = 0;
   t->magic = THREAD_MAGIC;
 
+/* ------------------------- */
+  list_init(&t->child_list);
+  sema_init(&t->sema_for_exit, 0);
+  sema_init(&t->sema_for_wait, 0);
+  sema_init(&t->sema_for_load, 0);
+  t->load_success = false;
+  t->exit_success = false;
+  t->exit_status = 0;
+/*-------------------------*/
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
