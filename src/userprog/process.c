@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -30,6 +31,7 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char *safe_name;
   char *rest_ptr;
   tid_t tid;
   
@@ -40,11 +42,16 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
   
-  strtok_r(file_name, " ", &rest_ptr);
+  safe_name = palloc_get_page (0);
+  strlcpy(safe_name, file_name, strlen(file_name) + 1);
+  char *safe_func_name = strtok_r(safe_name, " ", &rest_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (safe_func_name, PRI_DEFAULT, start_process, fn_copy);
   sema_down(&thread_current()->sema_for_load);
+
+  palloc_free_page(safe_name);
+  
   if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
     return tid;
@@ -53,7 +60,7 @@ process_execute (const char *file_name)
   if (child && child->load_success) {
     return tid;
   }
-  //그외 모두
+  //other cases
   return TID_ERROR;
 }
 
@@ -214,6 +221,17 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
+
+  filesys_lock_acquire();
+
+  for (int i = 2; i < 64; i++) {
+    if (cur->fdt[i] !=NULL) {
+      file_close(cur->fdt[i]);
+      cur->fdt[i] = NULL;
+    }
+  }
+  
+  filesys_lock_release();
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
@@ -232,6 +250,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  
   cur->exit_success = true;
   sema_up(&cur->sema_for_wait);
   sema_down(&cur->sema_for_exit);
@@ -350,6 +369,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
+  
+
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -432,7 +453,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
  done:
-  /* We arrive here whether the load is successful or not. */
+
   file_close (file);
   return success;
 }

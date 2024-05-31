@@ -737,6 +737,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->load_success = false;
   t->exit_success = false;
   t->exit_status = 0;
+
+  for (int i = 0; i++; i<64) {
+    t->fdt[i] = NULL;
+  }
+  t->next_fd = 3;
+
 /*-------------------------*/
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

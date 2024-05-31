@@ -117,6 +117,11 @@ struct thread
     struct semaphore sema_for_exit;
     struct semaphore sema_for_wait;
     struct semaphore sema_for_load;
+    /*file descriptor*/
+    struct file* fdt[64];
+    int next_fd;
+    /*deny write*/
+
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
